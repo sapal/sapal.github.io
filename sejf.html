@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="pl">
+  <head>
+    <meta charset="utf-8">
+    <title>Sejf - zaszyfruj swoje pliki</title>
+    <script id="common">
+      const CHUNK_SIZE = 10000;
+      function getRandomBytes(count) {
+        return window.crypto.getRandomValues(new Uint8Array(count));
+      }
+      function toB64(bytes) {
+        var result = "";
+        for (var i = 0; i < bytes.length; i += CHUNK_SIZE) {
+          result += String.fromCharCode(...bytes.slice(i, Math.min(i + CHUNK_SIZE, bytes.length)));
+        }
+        return btoa(result);
+      }
+      async function getKey(password, salt, keyUsage) {
+        const passwordKey = await window.crypto.subtle.importKey(
+            "raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveKey"]);
+        return window.crypto.subtle.deriveKey(
+            {name: "PBKDF2", salt: salt, iterations: 256000, hash: "SHA-256"},
+            passwordKey,
+            {name: "AES-GCM", length: 256},
+            false,
+            keyUsage); 
+      }
+      function download(name, type, data) {
+        const blob = new Blob([data], {type});
+        const link = document.createElement('a');
+        link.download = name;
+        link.href = window.URL.createObjectURL(blob);
+        link.click();
+      }
+    </script>
+    <script id="decrypt-only">
+      async function decrypt(cyphertext, password) {
+        const bytes = Uint8Array.from(atob(cyphertext), (m) => m.codePointAt(0));
+        const salt = bytes.slice(0, 16);
+        const iv = bytes.slice(16, 48);
+        const encrypted = bytes.slice(48);
+        const key = await getKey(password, salt, ["decrypt"]);
+        return await window.crypto.subtle.decrypt({name: "AES-GCM", iv: iv}, key, encrypted);
+      }
+      function attachDecryptionUI(cyphertext, name, type) {
+        document.getElementById("decrypt").addEventListener("click", () => {
+          const password = document.getElementById("password").value;
+          decrypt(cyphertext, password).then((decrypted) => {
+            download(name, type, new Uint8Array(decrypted));
+          }).catch((e) => {console.log(e);window.alert(`Błąd odszyfrowywania: ${e}`);});
+        });
+      }
+    </script>
+    <script id="encrypt-only">
+      async function encrypt(bytes, password) {
+        const salt = getRandomBytes(16);
+        const iv = getRandomBytes(32);
+        const key = await getKey(password, salt, ["encrypt"]);
+        const encrypted = new Uint8Array(await window.crypto.subtle.encrypt({name: "AES-GCM", iv: iv}, key, bytes));
+        const cyphertext = new Uint8Array(16 + 32 + encrypted.length);
+        cyphertext.set(salt);
+        cyphertext.set(iv, 16);
+        cyphertext.set(encrypted, 16 + 32);
+        return toB64(cyphertext);
+      }
+      function getScriptWithText(text) {
+        return "<script>" + text + "</" + "script" + ">";
+      }
+      function getTagById(id) {
+        const element = document.getElementById(id);
+        return `<${element.tagName}>${element.innerText}</${element.tagName}>`;
+      }
+      function secretHTML(cyphertext, name, type) {
+        return `<!DOCTYPE html>
+<html lang="pl">
+  <head>
+    <meta charset="utf-8">
+    <title>Podaj hasło i otwórz sekret</title>
+    ${getTagById("common")}
+    ${getTagById("decrypt-only")}
+    ${getTagById("common-style")}
+  </head>
+  <body>
+    <div class="block">
+      <p>Zaszyfrowany plik: ${name}</p>
+      <p>Hasło: <input type="text" id="password"></p>
+      <p><input type="button" id="decrypt" value="Otwórz" class="button"></p>
+    </div>
+    ${getScriptWithText("attachDecryptionUI('" + cyphertext + "', '" + name + "', '" + type +"');")}
+  </body>
+</html>`;
+      }
+      function show(element, visible) {
+        if (visible) {
+          element.classList.remove("hidden");
+        } else {
+          element.classList.add("hidden");
+        }
+      }
+      function attachEncryptionUI() {
+        const fileInput = document.getElementById("file");
+        const encryptButton = document.getElementById("encrypt");
+        const encryptGroup = document.getElementById("encrypt-group");
+        const dropHint = document.getElementById("drop-hint");
+        const chosenFile = document.getElementById("chosen-file");
+        const fileLabel = document.getElementById("file-label");
+
+        const filesChanged = () => {
+          const hasFiles = (fileInput.files.length !== 0);
+          show(encryptGroup, hasFiles);
+          show(chosenFile, hasFiles);
+          show(dropHint, !hasFiles);
+          if (hasFiles) {
+            chosenFile.textContent = `Wybrany plik: ${fileInput.files[0].name}`;
+            fileLabel.textContent = 'Zmień plik';
+          } else {
+            fileLabel.textContent = 'Wybierz plik';
+          }
+        };
+
+        fileInput.addEventListener("change", filesChanged);
+
+        encryptButton.addEventListener("click", () => {
+          const password = document.getElementById("password").value;
+          const file = fileInput.files[0];
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            encrypt(e.target.result, password).then((cyphertext) => {
+              const html = secretHTML(cyphertext, file.name, file.type);
+              download("secret.html", "text/html", new TextEncoder().encode(html));
+            });
+          };
+          reader.readAsArrayBuffer(file);
+        });
+
+        const fileDrop = document.getElementById("file-drop");
+        ["drop", "dragover"].forEach((event) => {
+          document.body.addEventListener(event, (e) => {e.preventDefault(); e.stopPropagation();}, false);
+        });
+        fileDrop.addEventListener("dragenter", (e) => {fileDrop.classList.add("dragging"); e.preventDefault(); e.stopPropagation(); }, true);
+        fileDrop.addEventListener("dragover", (e) => {e.preventDefault(); e.stopPropagation();}, true);
+        document.body.addEventListener("dragenter", (e) => {fileDrop.classList.remove("dragging");});
+        fileDrop.addEventListener("drop", (e) => {
+          fileInput.files = e.dataTransfer.files;
+          filesChanged();
+          fileDrop.classList.remove("dragging");
+          e.preventDefault();
+        }, true);
+      }
+    </script>
+    <style id="common-style">
+    body { text-align: center; height: 80vh; font-family: cursive; padding: 10vh; }
+    .block { padding: 20px; border: 1px solid black; max-width: 500px; margin-right: auto; margin-left: auto; }
+    .button { background: white; font-family: cursive; display: inline-block; padding: 10px; border: 1px solid black; cursor: pointer; margin-bottom: 10px; }
+    input[type="text"] {font-family: cursive;}
+    </style>
+    <style>
+    .hidden { display: none; }
+    .dragging { background: red; }
+    #chosen-file { padding: 30px; }
+    #file { display: none; }
+    </style>
+  </head>
+  <body>
+    <div id="file-drop" class="block">
+      <div id="drop-hint">
+        <p>Wrzuć tu plik</p>
+        <p>lub</p>
+      </div>
+      <div id="chosen-file" class="hidden"></div>
+      <label id="file-label" for="file" class="button">Wybierz plik</label><input type="file" id="file">
+    </div>
+    <div id="encrypt-group" class="hidden">
+      <p>Podaj hasło:</p> 
+      <p><input type="text" id="password"></p>
+      <p><input id="encrypt" type="button" value="Zaszyfruj" class="button"></p>
+    </div>
+    <script>attachEncryptionUI();</script>
+  </body>
+</html>
