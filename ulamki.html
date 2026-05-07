@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fraction Explorer - Laboratorium Ułamków</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --blue: #3b82f6;
+            --green: #10b981;
+            --purple: #8b5cf6;
+            --bg: #f8fafc;
+            --text: #1e293b;
+            --card-bg: #ffffff;
+            --border: #e2e8f0;
+            --gray: #94a3b8;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        header {
+            padding: 1rem;
+            background: var(--card-bg);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+            z-index: 10;
+        }
+
+        .top-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .input-group {
+            display: flex;
+            gap: 0.5rem;
+            flex-grow: 1;
+            max-width: 600px;
+        }
+
+        input[type="text"] {
+            flex-grow: 1;
+            padding: 0.6rem 1rem;
+            border: 1px solid var(--border);
+            border-radius: 0.5rem;
+            font-size: 1rem;
+            outline: none;
+            font-family: inherit;
+        }
+
+        input[type="text"]:focus {
+            border-color: var(--blue);
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
+        }
+
+        button {
+            padding: 0.5rem 1rem;
+            border: 1px solid var(--border);
+            background: var(--card-bg);
+            border-radius: 0.5rem;
+            cursor: pointer;
+            font-size: 0.875rem;
+            transition: all 0.2s;
+            font-family: inherit;
+            font-weight: 500;
+        }
+
+        button:hover {
+            background: #f1f5f9;
+            border-color: #cbd5e1;
+        }
+
+        button.primary {
+            background: var(--blue);
+            color: white;
+            border-color: var(--blue);
+        }
+
+        button.primary:hover {
+            background: #2563eb;
+        }
+
+        .examples {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+
+        .examples button {
+            font-size: 0.75rem;
+            padding: 0.3rem 0.6rem;
+            color: #475569;
+            background: #f1f5f9;
+            border: none;
+        }
+
+        .examples button:hover {
+            background: #e2e8f0;
+        }
+
+        main {
+            flex-grow: 1;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            background: white;
+        }
+
+        #visualization {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        footer {
+            padding: 1.5rem;
+            background: var(--card-bg);
+            border-top: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            gap: 1.25rem;
+            z-index: 10;
+        }
+
+        .controls {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 1.5rem;
+        }
+
+        .timeline-container {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            width: 100%;
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        input[type="range"] {
+            flex-grow: 1;
+            cursor: pointer;
+            height: 6px;
+            -webkit-appearance: none;
+            background: var(--border);
+            border-radius: 3px;
+            outline: none;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 18px;
+            height: 18px;
+            background: var(--blue);
+            border-radius: 50%;
+            cursor: pointer;
+            border: 2px solid white;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+        }
+
+        .info-box {
+            padding: 1rem 1.5rem;
+            background: #f1f5f9;
+            border-radius: 0.75rem;
+            text-align: center;
+            min-height: 4.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 500;
+            max-width: 900px;
+            margin: 0 auto;
+            width: 100%;
+            line-height: 1.5;
+            font-size: 1.05rem;
+            color: #334155;
+        }
+
+        #error-msg {
+            color: #ef4444;
+            font-size: 0.875rem;
+            margin-top: 0.25rem;
+            display: none;
+            font-weight: 600;
+        }
+
+        .step-btn {
+            width: 2.5rem;
+            height: 2.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            font-size: 1rem;
+        }
+
+        #play-pause-btn {
+            width: 3.5rem;
+            height: 3.5rem;
+            font-size: 1.25rem;
+            border-radius: 50%;
+        }
+
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="top-row">
+            <div class="input-group">
+                <input type="text" id="fraction-input" placeholder="np. 1/2 + 1/3 lub 6/8" aria-label="Wejście ułamków">
+            </div>
+            <button id="lang-btn">EN</button>
+        </div>
+        <div id="error-msg"></div>
+        <div class="examples" id="example-buttons">
+        </div>
+    </header>
+
+    <main>
+        <svg id="visualization" preserveAspectRatio="xMidYMid meet" viewBox="0 0 800 400">
+            <g id="labels-container"></g>
+            <g id="slices-container"></g>
+        </svg>
+    </main>
+
+    <footer>
+        <div class="info-box" id="step-description">
+            Wpisz ułamek lub wybierz przykład, aby rozpocząć.
+        </div>
+        <div class="timeline-container">
+            <input type="range" id="timeline-slider" min="0" max="0" value="0" step="0.001">
+        </div>
+        <div class="controls">
+            <button id="prev-btn" class="step-btn" title="Poprzedni krok">◀</button>
+            <button id="play-pause-btn" class="primary" title="Odtwórz/Zatrzymaj">▶</button>
+            <button id="next-btn" class="step-btn" title="Następny krok">▶</button>
+        </div>
+    </footer>
+
+    <script>
+        const i18n = {
+            pl: {
+                placeholder: "np. 1/2 + 1/3 lub 6/8",
+                langBtn: "EN",
+                startMsg: "Wpisz ułamek lub wybierz przykład, aby rozpocząć.",
+                errZero: "Mianownik nie może być zerem.",
+                errNeg: "Ujemne liczby nie są obsługiwane.",
+                errLarge: "Mianownik jest zbyt duży (maksymalnie 24).",
+                errInvalid: "Niepoprawny format ułamka.",
+                stepRepresent: "Przedstawiamy ułamek {f}",
+                stepDivide: "Dzielimy koło na {d} części",
+                stepFade: "Zostawiamy tylko jeden kawałek 1/{d}",
+                stepDuplicate: "Powielamy kawałek {total} razy",
+                stepCommonF1: "Każdą z części w ułamku {f_old} dzielimy na {k} fragmenty. Teraz jest to ułamek {f_new}.",
+                stepCommonF2: "Każdą z części w ułamku {f_old} dzielimy na {k} fragmenty. Teraz jest to ułamek {f_new}.",
+                stepAdd: "Łączymy wszystkie kawałki w kółkach",
+                stepSub: "Nakładamy drugi ułamek i zabieramy go",
+                stepMulDiv: "Każdy kawałek dzielimy na {d} części.",
+                stepMulTake: "Bierzemy po jednej części z każdego kawałka. Mamy teraz {f}.",
+                stepMulDup: "Powielamy je {total} razy.",
+                stepMulTotal: "W sumie mamy {f}.",
+                stepSimp: "Grupujemy kawałki po {k} i łączymy w większe (skracanie)",
+                stepResult: "Ostateczny wynik: {f}",
+                examples: {
+                    add: "1/2 + 1/3",
+                    sub: "3/4 - 1/2",
+                    mul: "1/2 * 5/6",
+                    improperMul: "2/3 * 4/3",
+                    shrink: "6/8",
+                    improper: "7/3"
+                }
+            },
+            en: {
+                placeholder: "e.g., 1/2 + 1/3 or 6/8",
+                langBtn: "DE",
+                startMsg: "Enter a fraction or pick an example to start.",
+                errZero: "Denominator cannot be zero.",
+                errNeg: "Negative numbers are not supported.",
+                errLarge: "Denominator is too large (max 24).",
+                errInvalid: "Invalid fraction format.",
+                stepRepresent: "Representing fraction {f}",
+                stepDivide: "Dividing circle into {d} parts",
+                stepFade: "Leaving only one piece 1/{d}",
+                stepDuplicate: "Duplicating piece {total} times",
+                stepCommonF1: "Dividing each part of {f_old} into {k} fragments. Now it is {f_new}.",
+                stepCommonF2: "Dividing each part of {f_old} into {k} fragments. Now it is {f_new}.",
+                stepAdd: "Combining all pieces into circles",
+                stepSub: "Overlaying the second fraction and taking it away",
+                stepMulDiv: "Dividing each piece into {d} parts.",
+                stepMulTake: "Taking one part from each piece. We now have {f}.",
+                stepMulDup: "Duplicating them {total} times.",
+                stepMulTotal: "In total we have {f}.",
+                stepSimp: "Grouping pieces by {k} and merging them (simplifying)",
+                stepResult: "Final result: {f}",
+                examples: {
+                    add: "1/2 + 1/3",
+                    sub: "3/4 - 1/2",
+                    mul: "1/2 * 5/6",
+                    improperMul: "2/3 * 4/3",
+                    shrink: "6/8",
+                    improper: "7/3"
+                }
+            },
+            de: {
+                placeholder: "z.B. 1/2 + 1/3 oder 6/8",
+                langBtn: "PL",
+                startMsg: "Geben Sie einen Bruch ein oder wählen Sie ein Beispiel aus.",
+                errZero: "Nenner darf nicht Null sein.",
+                errNeg: "Negative Zahlen werden nicht unterstützt.",
+                errLarge: "Nenner ist zu groß (max. 24).",
+                errInvalid: "Ungültiges Bruchformat.",
+                stepRepresent: "Wir stellen den Bruch {f} dar",
+                stepDivide: "Wir teilen den Kreis in {d} Teile",
+                stepFade: "Wir lassen nur ein Stück 1/{d} übrig",
+                stepDuplicate: "Wir vervielfachen das Stück {total} mal",
+                stepCommonF1: "Jeder Teil in {f_old} wird in {k} Fragmente unterteilt. Jetzt ist es {f_new}.",
+                stepCommonF2: "Jeder Teil in {f_old} wird in {k} Fragmente unterteilt. Jetzt ist es {f_new}.",
+                stepAdd: "Wir legen alle Teile in Kreisen zusammen",
+                stepSub: "Wir legen den zweiten Bruch auf den ersten und ziehen ihn ab",
+                stepMulDiv: "Jedes Stück wird in {d} Teile geteilt.",
+                stepMulTake: "Wir nehmen ein Teil von jedem Stück. Wir haben jetzt {f}.",
+                stepMulDup: "Wir vervielfachen sie {total} mal.",
+                stepMulTotal: "Insgesamt haben wir {f}.",
+                stepSimp: "Gruppieren und Zusammenfügen von Teilen (Kürzen durch {k})",
+                stepResult: "Endergebnis: {f}",
+                examples: {
+                    add: "1/2 + 1/3",
+                    sub: "3/4 - 1/2",
+                    mul: "1/2 * 5/6",
+                    improperMul: "2/3 * 4/3",
+                    shrink: "6/8",
+                    improper: "7/3"
+                }
+            }
+        };
+
+        let currentLang = 'pl';
+
+        class Fraction {
+            constructor(n, d) {
+                this.n = n;
+                this.d = d;
+            }
+            simplify() {
+                const common = gcd(this.n, this.d);
+                return new Fraction(this.n / common, this.d / common);
+            }
+            toString() {
+                return `${this.n}/${this.d}`;
+            }
+        }
+
+        function gcd(a, b) { return b ? gcd(b, a % b) : a; }
+        function lcm(a, b) { return (a === 0 || b === 0) ? 0 : Math.abs(a * b) / gcd(a, b); }
+
+        class SliceState {
+            constructor(id, cx, cy, radius, startAngle, endAngle, color, opacity = 1) {
+                this.id = id;
+                this.cx = cx;
+                this.cy = cy;
+                this.radius = radius;
+                this.startAngle = startAngle;
+                this.endAngle = endAngle;
+                this.color = color;
+                this.opacity = opacity;
+            }
+        }
+
+        class AnimationStep {
+            constructor(slices, descriptionKey, descriptionParams = {}) {
+                this.slices = slices.map(s => ({...s}));
+                this.descriptionKey = descriptionKey;
+                this.descriptionParams = descriptionParams;
+            }
+        }
+
+        let animationSteps = [];
+        let currentStepIndex = 0;
+        let isPlaying = false;
+        let animationFrameId = null;
+
+        const COLORS = {
+            blue: '#3b82f6',
+            green: '#10b981',
+            purple: '#8b5cf6',
+            gray: '#cbd5e1',
+            bg: '#f1f5f9'
+        };
+
+        const BASE_X = 150;
+        const BASE_Y = 200;
+        const RADIUS = 80;
+        const SPACING = 210;
+
+        const elements = {
+            input: document.getElementById('fraction-input'),
+            langBtn: document.getElementById('lang-btn'),
+            errorMsg: document.getElementById('error-msg'),
+            examples: document.getElementById('example-buttons'),
+            visualization: document.getElementById('slices-container'),
+            labels: document.getElementById('labels-container'),
+            svg: document.getElementById('visualization'),
+            stepInfo: document.getElementById('step-description'),
+            slider: document.getElementById('timeline-slider'),
+            prevBtn: document.getElementById('prev-btn'),
+            playPauseBtn: document.getElementById('play-pause-btn'),
+            nextBtn: document.getElementById('next-btn')
+        };
+
+        function init() {
+            renderExamples();
+            setupEventListeners();
+            elements.input.value = "1/2 + 2/3";
+            solve();
+            updateUI();
+        }
+
+        function renderExamples() {
+            elements.examples.innerHTML = '';
+            const ex = i18n[currentLang].examples;
+            Object.values(ex).forEach(text => {
+                const btn = document.createElement('button');
+                btn.textContent = text;
+                btn.onclick = () => { elements.input.value = text; solve(); };
+                elements.examples.appendChild(btn);
+            });
+        }
+
+        function setupEventListeners() {
+            elements.langBtn.onclick = () => {
+                if (currentLang === 'pl') currentLang = 'en';
+                else if (currentLang === 'en') currentLang = 'de';
+                else currentLang = 'pl';
+                updateUI();
+                renderExamples();
+            };
+            elements.input.oninput = () => {
+                const val = elements.input.value.trim();
+                if (parseInput(val)) {
+                    solve();
+                }
+            };
+            elements.slider.oninput = () => {
+                currentStepIndex = parseFloat(elements.slider.value);
+                renderAt(currentStepIndex);
+                pauseAnimation();
+            };
+            elements.prevBtn.onclick = () => goToStep(Math.max(0, Math.floor(currentStepIndex - 0.001)));
+            elements.nextBtn.onclick = () => goToStep(Math.min(animationSteps.length - 1, Math.ceil(currentStepIndex + 0.001)));
+            elements.playPauseBtn.onclick = togglePlay;
+        }
+
+        function updateUI() {
+            const t = i18n[currentLang];
+            elements.input.placeholder = t.placeholder;
+            elements.langBtn.textContent = t.langBtn;
+            if (animationSteps.length === 0) elements.stepInfo.textContent = t.startMsg;
+            else updateDescription();
+        }
+
+        function showError(key) {
+            elements.errorMsg.textContent = i18n[currentLang][key] || key;
+            elements.errorMsg.style.display = 'block';
+            setTimeout(() => { elements.errorMsg.style.display = 'none'; }, 3000);
+        }
+
+        function solve() {
+            const input = elements.input.value.trim();
+            if (!input) return;
+            try {
+                const task = parseInput(input);
+                if (!task) throw new Error('errInvalid');
+                generateAnimation(task);
+                currentStepIndex = 0;
+                elements.slider.max = animationSteps.length - 1;
+                elements.slider.value = 0;
+                adjustSVGViewBox();
+                renderAt(0);
+                updateDescription();
+            } catch (e) {
+                showError(e.message);
+            }
+        }
+
+        function parseInput(input) {
+            let match = input.match(/^(\d+)\/(\d+)\s*([\+\-\*])\s*(\d+)\/(\d+)$/);
+            if (match) return { type: match[3], f1: validateFraction(match[1], match[2]), f2: validateFraction(match[4], match[5]) };
+            match = input.match(/^(\d+)\/(\d+)$/);
+            if (match) return { type: 'single', f1: validateFraction(match[1], match[2]) };
+            return null;
+        }
+
+        function validateFraction(n, d) {
+            const num = parseInt(n); const den = parseInt(d);
+            if (den === 0) throw new Error('errZero');
+            if (num < 0 || den < 0) throw new Error('errNeg');
+            if (den > 24) throw new Error('errLarge');
+            return new Fraction(num, den);
+        }
+
+        function createAtoms(n, d, idPrefix, color, startCircleIdx = 0, opacity = 1) {
+            const atoms = [];
+            for (let i = 0; i < n; i++) {
+                const cIdx = startCircleIdx + Math.floor(i / d);
+                const pIdx = i % d;
+                atoms.push(new SliceState(`${idPrefix}_${i}`, BASE_X + cIdx * SPACING, BASE_Y, RADIUS, pIdx * 360 / d, (pIdx + 1) * 360 / d, color, opacity));
+            }
+            return atoms;
+        }
+
+        function addRepresentSteps(f, color, idPrefix, startCircle = 0) {
+            animationSteps.push(new AnimationStep([new SliceState(idPrefix + '_base', BASE_X + startCircle * SPACING, BASE_Y, RADIUS, 0, 360, COLORS.bg)], 'stepRepresent', {f: f.toString()}));
+            const divided = createAtoms(f.d, f.d, idPrefix, COLORS.gray, startCircle);
+            animationSteps.push(new AnimationStep(divided, 'stepDivide', {d: f.d}));
+            const oneLeft = divided.map((s, i) => i === 0 ? {...s, color: color} : {...s, opacity: 0});
+            animationSteps.push(new AnimationStep(oneLeft, 'stepFade', {d: f.d}));
+            for (let i = 2; i <= f.n; i++) {
+                animationSteps.push(new AnimationStep(createAtoms(i, f.d, idPrefix, color, startCircle), 'stepDuplicate', {total: f.n}));
+            }
+            if (f.n === 1) animationSteps.push(new AnimationStep(createAtoms(1, f.d, idPrefix, color, startCircle), 'stepRepresent', {f: f.toString()}));
+        }
+
+        function generateAnimation(task) {
+            animationSteps = [];
+            if (task.type === 'single') {
+                addRepresentSteps(task.f1, COLORS.blue, 'f1');
+                const simplified = task.f1.simplify();
+                if (simplified.n !== task.f1.n) {
+                    const k = task.f1.d / simplified.d;
+                    animationSteps.push(new AnimationStep(createAtoms(task.f1.n, task.f1.d, 'f1_simp', COLORS.blue), 'stepSimp', {k}));
+                    animationSteps.push(new AnimationStep(createAtoms(simplified.n, simplified.d, 'f1_final', COLORS.blue), 'stepResult', {f: `${task.f1} = ${simplified}`}));
+                }
+            } else if (task.type === '+') {
+                const commonD = lcm(task.f1.d, task.f2.d);
+                const n1 = task.f1.n * (commonD / task.f1.d);
+                const n2 = task.f2.n * (commonD / task.f2.d);
+                const k1 = commonD / task.f1.d;
+                const k2 = commonD / task.f2.d;
+                const s1 = createAtoms(task.f1.n, task.f1.d, 'f1', COLORS.blue, 0);
+                const s2 = createAtoms(task.f2.n, task.f2.d, 'f2', COLORS.green, Math.ceil(task.f1.n / task.f1.d) + 1);
+                animationSteps.push(new AnimationStep([...s1, ...s2], 'stepRepresent', {f: `${task.f1} + ${task.f2}`}));
+                const s1d = createAtoms(n1, commonD, 'f1c', COLORS.blue, 0);
+                animationSteps.push(new AnimationStep([...s1d, ...s2], 'stepCommonF1', {f_old: task.f1.toString(), k: k1, f_new: `${n1}/${commonD}`}));
+                const s2d = createAtoms(n2, commonD, 'f2c', COLORS.green, Math.ceil(task.f1.n / task.f1.d) + 1);
+                animationSteps.push(new AnimationStep([...s1d, ...s2d], 'stepCommonF2', {f_old: task.f2.toString(), k: k2, f_new: `${n2}/${commonD}`}));
+                const combined = [...createAtoms(n1, commonD, 'f1c', COLORS.blue, 0), ...createAtoms(n2, commonD, 'f2c', COLORS.green, 0).map((s, i) => {
+                    const totalIdx = n1 + i;
+                    const cIdx = Math.floor(totalIdx / commonD);
+                    const pIdx = totalIdx % commonD;
+                    return {...s, cx: BASE_X + cIdx * SPACING, startAngle: pIdx * 360 / commonD, endAngle: (pIdx + 1) * 360 / commonD};
+                })];
+                animationSteps.push(new AnimationStep(combined, 'stepAdd'));
+                const result = new Fraction(n1+n2, commonD).simplify();
+                animationSteps.push(new AnimationStep(combined.map(s => ({...s, color: COLORS.purple})), 'stepResult', {f: `${task.f1} + ${task.f2} = ${result}`}));
+            } else if (task.type === '-') {
+                const commonD = lcm(task.f1.d, task.f2.d);
+                const n1 = task.f1.n * (commonD / task.f1.d);
+                const n2 = task.f2.n * (commonD / task.f2.d);
+                const k1 = commonD / task.f1.d;
+                const k2 = commonD / task.f2.d;
+                const s1 = createAtoms(task.f1.n, task.f1.d, 'f1', COLORS.blue, 0);
+                const s2 = createAtoms(task.f2.n, task.f2.d, 'f2', COLORS.green, Math.ceil(task.f1.n / task.f1.d) + 1);
+                animationSteps.push(new AnimationStep([...s1, ...s2], 'stepRepresent', {f: `${task.f1} - ${task.f2}`}));
+                const s1d = createAtoms(n1, commonD, 'f1c', COLORS.blue, 0);
+                animationSteps.push(new AnimationStep([...s1d, ...s2], 'stepCommonF1', {f_old: task.f1.toString(), k: k1, f_new: `${n1}/${commonD}`}));
+                const s2d = createAtoms(n2, commonD, 'f2c', COLORS.green, Math.ceil(task.f1.n / task.f1.d) + 1);
+                animationSteps.push(new AnimationStep([...s1d, ...s2d], 'stepCommonF2', {f_old: task.f2.toString(), k: k2, f_new: `${n2}/${commonD}`}));
+                const overlaid = [...s1d, ...s2d.map((s, i) => {
+                    const tIdx = Math.max(0, n1 - n2) + i;
+                    return {...s, cx: BASE_X + Math.floor(tIdx/commonD) * SPACING, startAngle: (tIdx%commonD) * 360/commonD, endAngle: (tIdx%commonD+1) * 360/commonD};
+                })];
+                animationSteps.push(new AnimationStep(overlaid, 'stepSub'));
+                const gone = overlaid.map(s => (s.id.startsWith('f2c') || (s.id.startsWith('f1c') && parseInt(s.id.split('_')[2]) >= (n1 - n2))) ? {...s, opacity: 0} : s);
+                animationSteps.push(new AnimationStep(gone, 'stepSub'));
+                const finalN = Math.max(0, n1 - n2);
+                const result = new Fraction(finalN, commonD).simplify();
+                animationSteps.push(new AnimationStep(createAtoms(finalN, commonD, 'res', COLORS.purple, 0), 'stepResult', {f: `${task.f1} - ${task.f2} = ${result}`}));
+            } else if (task.type === '*') {
+                addRepresentSteps(task.f1, COLORS.blue, 'f1');
+                const b = task.f1.d; const d = task.f2.d; const commonD = b * d;
+                animationSteps.push(new AnimationStep(createAtoms(task.f1.n * d, commonD, 'mdiv', COLORS.blue), 'stepMulDiv', {d}));
+                const kept = createAtoms(task.f1.n * d, commonD, 'mdiv', COLORS.blue).map((s, i) => (i % d === 0) ? s : {...s, opacity: 0});
+                animationSteps.push(new AnimationStep(kept, 'stepMulTake', {f: new Fraction(task.f1.n, commonD).toString()}));
+                for (let k = 2; k <= task.f2.n; k++) animationSteps.push(new AnimationStep(createAtoms(task.f1.n * k, commonD, 'mres', COLORS.blue), 'stepMulDup', {total: task.f2.n}));
+                const finalRes = new Fraction(task.f1.n * task.f2.n, commonD).simplify();
+                animationSteps.push(new AnimationStep(createAtoms(task.f1.n * task.f2.n, commonD, 'mfinal', COLORS.purple), 'stepResult', {f: `${task.f1} * ${task.f2} = ${finalRes}`}));
+            }
+        }
+
+        function adjustSVGViewBox() {
+            let maxC = 0;
+            animationSteps.forEach(step => step.slices.forEach(s => maxC = Math.max(maxC, (s.cx - BASE_X) / SPACING + 1)));
+            elements.svg.setAttribute('viewBox', `0 0 ${Math.max(800, maxC * SPACING + 100)} 400`);
+        }
+
+        function renderAt(t) {
+            const idx = Math.floor(t); const nIdx = Math.min(idx + 1, animationSteps.length - 1); const ratio = t - idx;
+            const curS = animationSteps[idx].slices; const nxtS = animationSteps[nIdx].slices;
+            const ids = new Set([...curS.map(s => s.id), ...nxtS.map(s => s.id)]);
+            let html = ''; let circles = new Set();
+            ids.forEach(id => {
+                const s1 = curS.find(s => s.id === id); const s2 = nxtS.find(s => s.id === id);
+                let s = s1 && s2 ? interpolate(s1, s2, ratio) : (s1 ? interpolate(s1, {...s1, opacity: 0}, ratio) : interpolate({...s2, opacity: 0}, s2, ratio));
+                if (s.opacity > 0.001) { html += drawSlice(s); circles.add(`${s.cx},${s.cy}`); }
+            });
+            elements.visualization.innerHTML = html;
+            let bgHtml = ''; circles.forEach(pos => { const [cx, cy] = pos.split(',').map(Number); bgHtml += `<circle cx="${cx}" cy="${cy}" r="${RADIUS}" fill="none" stroke="${COLORS.bg}" stroke-width="2" />`; });
+            elements.labels.innerHTML = bgHtml;
+            updateDescription();
+        }
+
+        function interpolate(s1, s2, t) {
+            let ss = s1.startAngle, es = s2.startAngle; while (es - ss > 180) es -= 360; while (es - ss < -180) es += 360;
+            let se = s1.endAngle, ee = s2.endAngle; while (ee - se > 180) ee -= 360; while (ee - se < -180) ee += 360;
+            return { id: s1.id, cx: s1.cx + (s2.cx - s1.cx) * t, cy: s1.cy + (s2.cy - s1.cy) * t, radius: s1.radius + (s2.radius - s1.radius) * t, startAngle: ss + (es - ss) * t, endAngle: se + (ee - se) * t, color: t < 0.5 ? s1.color : s2.color, opacity: s1.opacity + (s2.opacity - s1.opacity) * t };
+        }
+
+        function drawSlice(s) {
+            const a = Math.abs(s.endAngle - s.startAngle);
+            if (a >= 359.9) return `<circle cx="${s.cx}" cy="${s.cy}" r="${s.radius}" fill="${s.color}" fill-opacity="${s.opacity}" stroke="white" stroke-width="0.5" />`;
+            const r1 = (s.startAngle - 90) * Math.PI / 180, r2 = (s.endAngle - 90) * Math.PI / 180;
+            const x1 = s.cx + s.radius * Math.cos(r1), y1 = s.cy + s.radius * Math.sin(r1), x2 = s.cx + s.radius * Math.cos(r2), y2 = s.cy + s.radius * Math.sin(r2);
+            return `<path d="M ${s.cx} ${s.cy} L ${x1} ${y1} A ${s.radius} ${s.radius} 0 ${a <= 180 ? 0 : 1} 1 ${x2} ${y2} Z" fill="${s.color}" fill-opacity="${s.opacity}" stroke="white" stroke-width="0.5" />`;
+        }
+
+        function updateDescription() {
+            const step = animationSteps[Math.round(currentStepIndex)]; if (!step) return;
+            let text = i18n[currentLang][step.descriptionKey] || step.descriptionKey;
+            for (const [k, v] of Object.entries(step.descriptionParams)) text = text.replace(`{${k}}`, v);
+            elements.stepInfo.textContent = text;
+        }
+
+        function togglePlay() { isPlaying ? pauseAnimation() : startAnimation(); }
+        function startAnimation() {
+            if (currentStepIndex >= animationSteps.length - 1) currentStepIndex = 0;
+            isPlaying = true; elements.playPauseBtn.textContent = '⏸'; animate();
+        }
+        function pauseAnimation() { isPlaying = false; elements.playPauseBtn.textContent = '▶'; cancelAnimationFrame(animationFrameId); }
+        function animate() {
+            if (!isPlaying) return;
+            if (currentStepIndex >= animationSteps.length - 1) { pauseAnimation(); return; }
+            currentStepIndex += 0.015; if (currentStepIndex > animationSteps.length - 1) currentStepIndex = animationSteps.length - 1;
+            elements.slider.value = currentStepIndex; renderAt(currentStepIndex);
+            animationFrameId = requestAnimationFrame(animate);
+        }
+        function goToStep(index) { pauseAnimation(); currentStepIndex = Math.max(0, Math.min(index, animationSteps.length - 1)); elements.slider.value = currentStepIndex; renderAt(currentStepIndex); }
+
+        init();
+    </script>
+</body>
+</html>
