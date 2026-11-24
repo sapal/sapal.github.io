@@ -2,94 +2,363 @@
 <html lang="pl">
   <head>
     <meta charset="utf-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'none'; img-src 'none'; form-action 'none'; base-uri 'none';">
     <title>Sejf - zaszyfruj swoje pliki</title>
     <script id="common">
       const CHUNK_SIZE = 10000;
+      const FORMAT_VERSION = 2;
+      const DEFAULT_KDF = { name: "PBKDF2", hash: "SHA-512", iterations: 600000 };
+      const MAX_KDF_ITERATIONS = 10000000;
+      const SALT_LENGTH = 16;
+      const IV_LENGTH = 12;
+
       function getRandomBytes(count) {
         return window.crypto.getRandomValues(new Uint8Array(count));
       }
+
       function toB64(bytes) {
-        var result = "";
-        for (var i = 0; i < bytes.length; i += CHUNK_SIZE) {
-          result += String.fromCharCode(...bytes.slice(i, Math.min(i + CHUNK_SIZE, bytes.length)));
+        let result = "";
+        for (let i = 0; i < bytes.length; i += CHUNK_SIZE) {
+          result += String.fromCharCode(...bytes.subarray(i, Math.min(i + CHUNK_SIZE, bytes.length)));
         }
         return btoa(result);
       }
-      async function getKey(password, salt, keyUsage) {
-        const passwordKey = await window.crypto.subtle.importKey(
-            "raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveKey"]);
-        return window.crypto.subtle.deriveKey(
-            {name: "PBKDF2", salt: salt, iterations: 256000, hash: "SHA-256"},
-            passwordKey,
-            {name: "AES-GCM", length: 256},
-            false,
-            keyUsage); 
+
+      function fromB64(b64) {
+        const binary = atob(b64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+          bytes[i] = binary.charCodeAt(i);
+        }
+        return bytes;
       }
+
+      function hasWebCrypto() {
+        return Boolean(window.crypto && window.crypto.subtle);
+      }
+
+      async function getKey(password, salt, kdf, keyUsage) {
+        const normalizedPassword = password.normalize("NFC");
+        const encodedPassword = new TextEncoder().encode(normalizedPassword);
+        try {
+          const passwordKey = await window.crypto.subtle.importKey(
+              "raw", encodedPassword, "PBKDF2", false, ["deriveKey"]);
+          return await window.crypto.subtle.deriveKey(
+              { name: kdf.name, salt: salt, iterations: kdf.iterations, hash: kdf.hash },
+              passwordKey,
+              { name: "AES-GCM", length: 256 },
+              false,
+              keyUsage);
+        } finally {
+          encodedPassword.fill(0);
+        }
+      }
+
+      function buildAAD(v, kdf, saltB64, ivB64, displayName) {
+        return new TextEncoder().encode(JSON.stringify([
+          v,
+          kdf.name,
+          kdf.hash,
+          kdf.iterations,
+          saltB64,
+          ivB64,
+          displayName
+        ]));
+      }
+
+      function packPayload(name, type, fileBytes) {
+        const headerBytes = new TextEncoder().encode(JSON.stringify({
+          name: name,
+          type: type || ""
+        }));
+        const packed = new Uint8Array(4 + headerBytes.length + fileBytes.length);
+        const view = new DataView(packed.buffer);
+        view.setUint32(0, headerBytes.length, false);
+        packed.set(headerBytes, 4);
+        packed.set(fileBytes, 4 + headerBytes.length);
+        headerBytes.fill(0);
+        return packed;
+      }
+
+      function unpackPayload(decryptedBuffer) {
+        const bytes = new Uint8Array(decryptedBuffer);
+        try {
+          if (bytes.length < 4) {
+            throw new Error("Invalid payload length");
+          }
+          const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+          const headerLen = view.getUint32(0, false);
+          if (4 + headerLen > bytes.length) {
+            throw new Error("Invalid payload header length");
+          }
+          const headerJson = new TextDecoder().decode(bytes.subarray(4, 4 + headerLen));
+          const header = JSON.parse(headerJson);
+          if (!header || typeof header.name !== "string" || typeof header.type !== "string") {
+            throw new Error("Invalid payload header");
+          }
+          const data = bytes.slice(4 + headerLen);
+          return { name: header.name, type: header.type, data: data };
+        } finally {
+          bytes.fill(0);
+        }
+      }
+
+      function setStatus(element, message, kind) {
+        element.textContent = message;
+        element.classList.remove("error", "success");
+        if (kind === "error" || kind === "success") {
+          element.classList.add(kind);
+        }
+      }
+
       function download(name, type, data) {
-        const blob = new Blob([data], {type});
-        const link = document.createElement('a');
+        const mimeType = type || "application/octet-stream";
+        const blob = new Blob([data], { type: mimeType });
+        if (data instanceof Uint8Array) {
+          data.fill(0);
+        }
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement("a");
         link.download = name;
-        link.href = window.URL.createObjectURL(blob);
+        link.href = url;
+        link.classList.add("hidden");
+        document.body.appendChild(link);
         link.click();
+        link.remove();
+        setTimeout(() => {
+          window.URL.revokeObjectURL(url);
+        }, 60000);
       }
     </script>
     <script id="decrypt-only">
-      async function decrypt(cyphertext, password) {
-        const bytes = Uint8Array.from(atob(cyphertext), (m) => m.codePointAt(0));
-        const salt = bytes.slice(0, 16);
-        const iv = bytes.slice(16, 48);
-        const encrypted = bytes.slice(48);
-        const key = await getKey(password, salt, ["decrypt"]);
-        return await window.crypto.subtle.decrypt({name: "AES-GCM", iv: iv}, key, encrypted);
+      async function decrypt(payload, password) {
+        if (!payload || payload.v !== FORMAT_VERSION) {
+          throw new Error("Unsupported format version");
+        }
+        if (!payload.kdf || payload.kdf.name !== "PBKDF2" ||
+            (payload.kdf.hash !== "SHA-256" && payload.kdf.hash !== "SHA-512") ||
+            !Number.isInteger(payload.kdf.iterations) ||
+            payload.kdf.iterations < 100000 ||
+            payload.kdf.iterations > MAX_KDF_ITERATIONS) {
+          throw new Error("Unsupported KDF parameters");
+        }
+        if (typeof payload.name !== "string" || typeof payload.salt !== "string" ||
+            typeof payload.iv !== "string" || typeof payload.ciphertext !== "string") {
+          throw new Error("Malformed payload");
+        }
+
+        const salt = fromB64(payload.salt);
+        const iv = fromB64(payload.iv);
+        if (salt.length !== SALT_LENGTH || iv.length !== IV_LENGTH) {
+          throw new Error("Invalid salt or IV length");
+        }
+        const encrypted = fromB64(payload.ciphertext);
+        const aad = buildAAD(payload.v, payload.kdf, payload.salt, payload.iv, payload.name);
+        const key = await getKey(password, salt, payload.kdf, ["decrypt"]);
+        const decrypted = await window.crypto.subtle.decrypt(
+            { name: "AES-GCM", iv: iv, additionalData: aad },
+            key,
+            encrypted);
+        const unpacked = unpackPayload(decrypted);
+        if (unpacked.name !== payload.name) {
+          unpacked.data.fill(0);
+          throw new Error("Filename mismatch");
+        }
+        return unpacked;
       }
-      function attachDecryptionUI(cyphertext, name, type) {
-        document.getElementById("decrypt").addEventListener("click", () => {
-          const password = document.getElementById("password").value;
-          decrypt(cyphertext, password).then((decrypted) => {
-            download(name, type, new Uint8Array(decrypted));
-          }).catch((e) => {console.log(e);window.alert(`Błąd odszyfrowywania: ${e}`);});
+
+      function attachDecryptionUI() {
+        const dataElement = document.getElementById("secret-data");
+        if (!dataElement) {
+          return;
+        }
+
+        const fileNameElement = document.getElementById("file-name");
+        const passwordInput = document.getElementById("password");
+        const showPasswordCheckbox = document.getElementById("show-password");
+        const decryptButton = document.getElementById("decrypt");
+        const statusElement = document.getElementById("status");
+
+        let payload;
+        try {
+          payload = JSON.parse(dataElement.textContent);
+        } catch (e) {
+          setStatus(statusElement, "Błąd: uszkodzone dane zaszyfrowanego pliku.", "error");
+          decryptButton.disabled = true;
+          return;
+        }
+        if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+          setStatus(statusElement, "Błąd: uszkodzone dane zaszyfrowanego pliku.", "error");
+          decryptButton.disabled = true;
+          return;
+        }
+
+        fileNameElement.textContent = typeof payload.name === "string" ? payload.name : "";
+
+        showPasswordCheckbox.addEventListener("change", () => {
+          passwordInput.type = showPasswordCheckbox.checked ? "text" : "password";
+        });
+
+        if (!hasWebCrypto()) {
+          setStatus(statusElement, "Przeglądarka nie obsługuje Web Crypto API w tym kontekście (wymagane HTTPS lub localhost).", "error");
+          decryptButton.disabled = true;
+          return;
+        }
+
+        let isBusy = false;
+        const runDecrypt = async () => {
+          if (isBusy) {
+            return;
+          }
+          const password = passwordInput.value;
+          if (!password) {
+            setStatus(statusElement, "Podaj hasło.", "error");
+            return;
+          }
+
+          isBusy = true;
+          decryptButton.disabled = true;
+          decryptButton.value = "Odszyfrowywanie...";
+          setStatus(statusElement, "", "");
+
+          try {
+            const result = await decrypt(payload, password);
+            download(result.name, result.type, result.data);
+            passwordInput.value = "";
+            showPasswordCheckbox.checked = false;
+            passwordInput.type = "password";
+            setStatus(statusElement, "Plik został odszyfrowany.", "success");
+          } catch (e) {
+            setStatus(statusElement, "Błąd odszyfrowywania: nieprawidłowe hasło lub uszkodzony plik.", "error");
+          } finally {
+            isBusy = false;
+            decryptButton.disabled = false;
+            decryptButton.value = "Otwórz";
+          }
+        };
+
+        decryptButton.addEventListener("click", runDecrypt);
+        passwordInput.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            runDecrypt();
+          }
         });
       }
+
+      document.addEventListener("DOMContentLoaded", attachDecryptionUI);
     </script>
     <script id="encrypt-only">
-      async function encrypt(bytes, password) {
-        const salt = getRandomBytes(16);
-        const iv = getRandomBytes(32);
-        const key = await getKey(password, salt, ["encrypt"]);
-        const encrypted = new Uint8Array(await window.crypto.subtle.encrypt({name: "AES-GCM", iv: iv}, key, bytes));
-        const cyphertext = new Uint8Array(16 + 32 + encrypted.length);
-        cyphertext.set(salt);
-        cyphertext.set(iv, 16);
-        cyphertext.set(encrypted, 16 + 32);
-        return toB64(cyphertext);
+      async function encrypt(fileBytes, name, type, password) {
+        const salt = getRandomBytes(SALT_LENGTH);
+        const iv = getRandomBytes(IV_LENGTH);
+        const saltB64 = toB64(salt);
+        const ivB64 = toB64(iv);
+        const aad = buildAAD(FORMAT_VERSION, DEFAULT_KDF, saltB64, ivB64, name);
+        const packed = packPayload(name, type, fileBytes);
+        try {
+          const key = await getKey(password, salt, DEFAULT_KDF, ["encrypt"]);
+          const encrypted = await window.crypto.subtle.encrypt(
+              { name: "AES-GCM", iv: iv, additionalData: aad },
+              key,
+              packed);
+          return {
+            v: FORMAT_VERSION,
+            name: name,
+            kdf: DEFAULT_KDF,
+            salt: saltB64,
+            iv: ivB64,
+            ciphertext: toB64(new Uint8Array(encrypted))
+          };
+        } finally {
+          packed.fill(0);
+          fileBytes.fill(0);
+        }
       }
-      function getScriptWithText(text) {
-        return "<script>" + text + "</" + "script" + ">";
+
+      function safeJsonForScript(obj) {
+        return JSON.stringify(obj)
+            .replace(/</g, "\\u003c")
+            .replace(/>/g, "\\u003e")
+            .replace(/&/g, "\\u0026")
+            .replace(/\u2028/g, "\\u2028")
+            .replace(/\u2029/g, "\\u2029");
       }
-      function getTagById(id) {
-        const element = document.getElementById(id);
-        return `<${element.tagName}>${element.innerText}</${element.tagName}>`;
+
+      function getNormalizedTextById(id) {
+        return document.getElementById(id).textContent.replace(/\r\n?/g, "\n");
       }
-      function secretHTML(cyphertext, name, type) {
+
+      async function sha256Base64(text) {
+        const digest = await window.crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+        return toB64(new Uint8Array(digest));
+      }
+
+      async function secretHTML(payload) {
+        const commonText = getNormalizedTextById("common");
+        const decryptText = getNormalizedTextById("decrypt-only");
+        const styleText = getNormalizedTextById("common-style");
+
+        const [commonHash, decryptHash, styleHash] = await Promise.all([
+          sha256Base64(commonText),
+          sha256Base64(decryptText),
+          sha256Base64(styleText)
+        ]);
+
+        const csp = [
+          "default-src 'none'",
+          `script-src 'sha256-${commonHash}' 'sha256-${decryptHash}'`,
+          `style-src 'sha256-${styleHash}'`,
+          "connect-src 'none'",
+          "img-src 'none'",
+          "form-action 'none'",
+          "base-uri 'none'"
+        ].join("; ") + ";";
+
         return `<!DOCTYPE html>
 <html lang="pl">
   <head>
     <meta charset="utf-8">
+    <meta http-equiv="Content-Security-Policy" content="${csp}">
     <title>Podaj hasło i otwórz sekret</title>
-    ${getTagById("common")}
-    ${getTagById("decrypt-only")}
-    ${getTagById("common-style")}
+    <script id="common">${commonText}</` + `script>
+    <script id="decrypt-only">${decryptText}</` + `script>
+    <style id="common-style">${styleText}</style>
   </head>
   <body>
     <div class="block">
-      <p>Zaszyfrowany plik: ${name}</p>
-      <p>Hasło: <input type="text" id="password"></p>
+      <p>Zaszyfrowany plik: <span id="file-name"></span></p>
+      <p>Hasło: <input type="password" id="password" autocomplete="off" spellcheck="false"></p>
+      <p><label class="checkbox-label"><input type="checkbox" id="show-password"> Pokaż hasło</label></p>
       <p><input type="button" id="decrypt" value="Otwórz" class="button"></p>
+      <p id="status" class="status" role="alert"></p>
     </div>
-    ${getScriptWithText("attachDecryptionUI('" + cyphertext + "', '" + name + "', '" + type +"');")}
+    <script type="application/json" id="secret-data">${safeJsonForScript(payload)}</` + `script>
   </body>
 </html>`;
       }
+
+      function evaluatePasswordStrength(password) {
+        if (!password) {
+          return { level: "", message: "" };
+        }
+        const normalized = password.normalize("NFC");
+        const uniqueChars = new Set([...normalized]).size;
+        let classes = 0;
+        if (/[a-z\p{Ll}]/u.test(normalized)) classes++;
+        if (/[A-Z\p{Lu}]/u.test(normalized)) classes++;
+        if (/[0-9]/.test(normalized)) classes++;
+        if (/[^A-Za-z0-9\p{L}\p{M}]/u.test(normalized)) classes++;
+
+        if (normalized.length < 12 || uniqueChars < 4) {
+          return { level: "weak", message: "Słabe hasło (zalecane min. 12 różnych znaków)" };
+        }
+        if ((normalized.length >= 16 || classes >= 3) && uniqueChars >= 6) {
+          return { level: "strong", message: "Silne hasło" };
+        }
+        return { level: "medium", message: "Średnie hasło" };
+      }
+
       function show(element, visible) {
         if (visible) {
           element.classList.remove("hidden");
@@ -97,6 +366,7 @@
           element.classList.add("hidden");
         }
       }
+
       function attachEncryptionUI() {
         const fileInput = document.getElementById("file");
         const encryptButton = document.getElementById("encrypt");
@@ -104,60 +374,161 @@
         const dropHint = document.getElementById("drop-hint");
         const chosenFile = document.getElementById("chosen-file");
         const fileLabel = document.getElementById("file-label");
+        const passwordInput = document.getElementById("password");
+        const passwordConfirmInput = document.getElementById("password-confirm");
+        const showPasswordCheckbox = document.getElementById("show-password");
+        const strengthElement = document.getElementById("password-strength");
+        const statusElement = document.getElementById("status");
+
+        const updateStrength = () => {
+          const strength = evaluatePasswordStrength(passwordInput.value);
+          strengthElement.textContent = strength.message;
+          strengthElement.classList.remove("strength-weak", "strength-medium", "strength-strong");
+          if (strength.level) {
+            strengthElement.classList.add(`strength-${strength.level}`);
+          }
+        };
+
+        showPasswordCheckbox.addEventListener("change", () => {
+          const inputType = showPasswordCheckbox.checked ? "text" : "password";
+          passwordInput.type = inputType;
+          passwordConfirmInput.type = inputType;
+        });
+
+        passwordInput.addEventListener("input", updateStrength);
+
+        if (!hasWebCrypto()) {
+          setStatus(statusElement, "Przeglądarka nie obsługuje Web Crypto API w tym kontekście (wymagane HTTPS lub localhost).", "error");
+          encryptButton.disabled = true;
+        }
 
         const filesChanged = () => {
           const hasFiles = (fileInput.files.length !== 0);
           show(encryptGroup, hasFiles);
           show(chosenFile, hasFiles);
           show(dropHint, !hasFiles);
+          if (hasWebCrypto()) {
+            setStatus(statusElement, "", "");
+          }
           if (hasFiles) {
             chosenFile.textContent = `Wybrany plik: ${fileInput.files[0].name}`;
-            fileLabel.textContent = 'Zmień plik';
+            fileLabel.textContent = "Zmień plik";
           } else {
-            fileLabel.textContent = 'Wybierz plik';
+            fileLabel.textContent = "Wybierz plik";
           }
         };
 
         fileInput.addEventListener("change", filesChanged);
 
-        encryptButton.addEventListener("click", () => {
-          const password = document.getElementById("password").value;
+        let isBusy = false;
+        const runEncrypt = async () => {
+          if (isBusy) {
+            return;
+          }
+          if (!hasWebCrypto()) {
+            setStatus(statusElement, "Przeglądarka nie obsługuje Web Crypto API w tym kontekście.", "error");
+            return;
+          }
           const file = fileInput.files[0];
-          const reader = new FileReader();
-          reader.onload = (e) => {
-            encrypt(e.target.result, password).then((cyphertext) => {
-              const html = secretHTML(cyphertext, file.name, file.type);
-              download("secret.html", "text/html", new TextEncoder().encode(html));
-            });
-          };
-          reader.readAsArrayBuffer(file);
+          if (!file) {
+            setStatus(statusElement, "Wybierz plik do zaszyfrowania.", "error");
+            return;
+          }
+          const password = passwordInput.value;
+          const passwordConfirm = passwordConfirmInput.value;
+          if (!password) {
+            setStatus(statusElement, "Hasło nie może być puste.", "error");
+            return;
+          }
+          if (password !== passwordConfirm) {
+            setStatus(statusElement, "Hasła nie są takie same.", "error");
+            return;
+          }
+
+          isBusy = true;
+          encryptButton.disabled = true;
+          encryptButton.value = "Szyfrowanie...";
+          setStatus(statusElement, "", "");
+
+          try {
+            const buffer = await file.arrayBuffer();
+            const payload = await encrypt(new Uint8Array(buffer), file.name, file.type, password);
+            const html = await secretHTML(payload);
+            download("secret.html", "text/html;charset=utf-8", new TextEncoder().encode(html));
+            passwordInput.value = "";
+            passwordConfirmInput.value = "";
+            showPasswordCheckbox.checked = false;
+            passwordInput.type = "password";
+            passwordConfirmInput.type = "password";
+            updateStrength();
+            setStatus(statusElement, "Plik został zaszyfrowany i pobrany jako secret.html.", "success");
+          } catch (e) {
+            setStatus(statusElement, `Błąd szyfrowania: ${e && e.message ? e.message : e}`, "error");
+          } finally {
+            isBusy = false;
+            encryptButton.disabled = false;
+            encryptButton.value = "Zaszyfruj";
+          }
+        };
+
+        encryptButton.addEventListener("click", runEncrypt);
+        [passwordInput, passwordConfirmInput].forEach((input) => {
+          input.addEventListener("keydown", (e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              runEncrypt();
+            }
+          });
         });
 
         const fileDrop = document.getElementById("file-drop");
         ["drop", "dragover"].forEach((event) => {
-          document.body.addEventListener(event, (e) => {e.preventDefault(); e.stopPropagation();}, false);
+          document.body.addEventListener(event, (e) => { e.preventDefault(); e.stopPropagation(); }, false);
         });
-        fileDrop.addEventListener("dragenter", (e) => {fileDrop.classList.add("dragging"); e.preventDefault(); e.stopPropagation(); }, true);
-        fileDrop.addEventListener("dragover", (e) => {e.preventDefault(); e.stopPropagation();}, true);
-        document.body.addEventListener("dragenter", (e) => {fileDrop.classList.remove("dragging");});
+        fileDrop.addEventListener("dragenter", (e) => { fileDrop.classList.add("dragging"); e.preventDefault(); e.stopPropagation(); }, true);
+        fileDrop.addEventListener("dragover", (e) => { e.preventDefault(); e.stopPropagation(); }, true);
+        fileDrop.addEventListener("dragleave", (e) => {
+          if (e.target === fileDrop) {
+            fileDrop.classList.remove("dragging");
+          }
+        }, true);
+        document.addEventListener("dragleave", (e) => {
+          if (e.relatedTarget === null) {
+            fileDrop.classList.remove("dragging");
+          }
+        });
+        document.body.addEventListener("dragenter", () => { fileDrop.classList.remove("dragging"); });
         fileDrop.addEventListener("drop", (e) => {
-          fileInput.files = e.dataTransfer.files;
-          filesChanged();
+          if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+            fileInput.files = e.dataTransfer.files;
+            filesChanged();
+          }
           fileDrop.classList.remove("dragging");
           e.preventDefault();
         }, true);
       }
+
+      document.addEventListener("DOMContentLoaded", attachEncryptionUI);
     </script>
     <style id="common-style">
     body { text-align: center; height: 80vh; font-family: cursive; padding: 10vh; }
     .block { padding: 20px; border: 1px solid black; max-width: 500px; margin-right: auto; margin-left: auto; }
     .button { background: white; font-family: cursive; display: inline-block; padding: 10px; border: 1px solid black; cursor: pointer; margin-bottom: 10px; }
-    input[type="text"] {font-family: cursive;}
+    .button:disabled { opacity: 0.6; cursor: wait; }
+    input[type="text"], input[type="password"] { font-family: cursive; }
+    .hidden { display: none; }
+    .checkbox-label { cursor: pointer; font-size: 0.9em; }
+    .status { min-height: 1.2em; font-size: 0.95em; }
+    .error { color: #b00020; }
+    .success { color: #0b6623; }
+    .strength-weak { color: #b00020; font-size: 0.9em; }
+    .strength-medium { color: #8a5a00; font-size: 0.9em; }
+    .strength-strong { color: #0b6623; font-size: 0.9em; }
+    #file-name { word-break: break-word; }
     </style>
     <style>
-    .hidden { display: none; }
     .dragging { background: #EEE; }
-    #chosen-file { padding: 30px; }
+    #chosen-file { padding: 30px; word-break: break-word; }
     #file { display: none; }
     </style>
   </head>
@@ -171,10 +542,14 @@
       <label id="file-label" for="file" class="button">Wybierz plik</label><input type="file" id="file">
     </div>
     <div id="encrypt-group" class="hidden">
-      <p>Podaj hasło:</p> 
-      <p><input type="text" id="password"></p>
+      <p>Podaj hasło:</p>
+      <p><input type="password" id="password" autocomplete="new-password" spellcheck="false"></p>
+      <p>Powtórz hasło:</p>
+      <p><input type="password" id="password-confirm" autocomplete="new-password" spellcheck="false"></p>
+      <p><label class="checkbox-label"><input type="checkbox" id="show-password"> Pokaż hasło</label></p>
+      <p id="password-strength"></p>
       <p><input id="encrypt" type="button" value="Zaszyfruj" class="button"></p>
     </div>
-    <script>attachEncryptionUI();</script>
+    <p id="status" class="status" role="alert"></p>
   </body>
 </html>
